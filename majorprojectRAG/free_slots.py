@@ -83,7 +83,69 @@ def format_free_slots_context(result: dict) -> str:
             )
 
     return "\n".join(lines)
+def get_free_slots_for_room(room_name: str, day: str) -> dict:
+    """
+    Computes which periods a room is occupied/free on a given day.
+    """
+    active_codes = timetables_col.distinct("code", {"currentSession": True})
 
+    docs = list(locksems_col.find({
+        "code": {"$in": active_codes},
+        "day":  {"$regex": day, "$options": "i"},
+        "slotData.room": {"$regex": room_name, "$options": "i"},
+    }))
+
+    busy_slots   = []
+    busy_details = []
+
+    for doc in docs:
+        slot = doc.get("slot", "")
+        sem  = doc.get("sem", "")
+        for entry in doc.get("slotData", []):
+            stored_room = entry.get("room", "")
+            if room_name.lower() in stored_room.lower():
+                busy_slots.append(slot)
+                busy_details.append({
+                    "slot":    slot,
+                    "time":    PERIOD_TIMES.get(slot, slot),
+                    "subject": entry.get("subject", ""),
+                    "faculty": entry.get("faculty", ""),
+                    "sem":     sem,
+                })
+
+    free_slots = [
+        {"slot": p, "time": PERIOD_TIMES[p]}
+        for p in TEACHING_PERIODS
+        if p not in busy_slots
+    ]
+
+    return {
+        "room":         room_name,
+        "day":          day,
+        "busy_slots":   busy_slots,
+        "busy_details": busy_details,
+        "free_slots":   free_slots,
+    }
+
+
+def format_free_slots_for_room_context(result: dict) -> str:
+    lines = [f"Room availability for {result['room']} on {result['day']}:"]
+
+    if result["free_slots"]:
+        free_str = ", ".join(f"{f['slot']} ({f['time']})" for f in result["free_slots"])
+        lines.append(f"FREE periods: {free_str}")
+    else:
+        lines.append("FREE periods: none — fully occupied all day")
+
+    if result["busy_details"]:
+        lines.append("OCCUPIED periods:")
+        for b in result["busy_details"]:
+            lines.append(
+                f"  - {b['slot']} ({b['time']}): {b['subject']} "
+                f"by {b['faculty']} for {b['sem']}"
+            )
+
+    return "\n".join(lines)
 
 # ── Quick test ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
